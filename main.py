@@ -33,22 +33,48 @@ MAX_BIO_CHARS = 180
 
 def validate_bio(bio: str) -> None:
     """Enforce the competition's entry rules: 1-180 chars, one line, UTF-8."""
-    if not bio or not bio.strip():
-        raise ValueError("bio must not be empty")
+    if not isinstance(bio, str):
+        raise ValueError(f"bio must be a string, got {type(bio).__name__}")
+    if not bio:
+        raise ValueError("bio must be at least 1 character long, got an empty string")
+    if not bio.strip():
+        raise ValueError("bio must not be blank or whitespace-only")
+    if bio != bio.strip():
+        raise ValueError("bio must not start or end with whitespace")
     if len(bio) > MAX_BIO_CHARS:
         raise ValueError(
             f"bio is {len(bio)} characters, over the {MAX_BIO_CHARS}-character limit"
         )
     if "\n" in bio or "\r" in bio:
         raise ValueError("bio must be a single line (no newline characters)")
+    for ch in bio:
+        if ord(ch) < 0x20 and ch not in ("\t",):
+            raise ValueError(
+                f"bio must not contain control character U+{ord(ch):04X}"
+            )
     bio.encode("utf-8")  # raises UnicodeEncodeError if not encodable
 
 
 def main() -> None:
     validate_bio(BIO)
-    os.makedirs(os.path.dirname(OUTPUT_PATH), exist_ok=True)
-    with open(OUTPUT_PATH, "w", encoding="utf-8") as f:
-        f.write(BIO)
+    out_dir = os.path.dirname(OUTPUT_PATH) or "."
+    try:
+        os.makedirs(out_dir, exist_ok=True)
+    except OSError as exc:
+        raise RuntimeError(f"cannot create output directory {out_dir!r}: {exc}") from exc
+    # Write atomically (temp file in the same directory, then rename) so a
+    # crash mid-write never leaves a half-written entry behind, then
+    # verify the file on disk round-trips byte-for-byte to the bio.
+    tmp_path = OUTPUT_PATH + ".tmp"
+    try:
+        with open(tmp_path, "w", encoding="utf-8", newline="") as f:
+            f.write(BIO)
+        os.replace(tmp_path, OUTPUT_PATH)
+    except OSError as exc:
+        raise RuntimeError(f"cannot write output file {OUTPUT_PATH!r}: {exc}") from exc
+    with open(OUTPUT_PATH, "r", encoding="utf-8", newline="") as f:
+        if f.read() != BIO:
+            raise RuntimeError("output file does not match the validated bio")
 
 
 if __name__ == "__main__":
